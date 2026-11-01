@@ -109,6 +109,14 @@ function jobCards(data){
         <p>담당자 전화번호: ${safe(j.contact_phone)}</p>
         <a href="tel:${safe(String(j.contact_phone).replace(/[^0-9+]/g,''))}">📞 전화하기</a>
       `:'<p>전화번호 미등록</p>'}
+   
+${user && j.owner_id === user.id ? `
+  <div class="actions">
+    <button type="button" data-edit="${safe(j.id)}">✏️ 수정</button>
+    <button type="button" data-delete="${safe(j.id)}">🗑️ 삭제</button>
+  </div>
+` : ''}
+
     </article>
   `).join('')||'<p>등록된 공고가 없습니다.</p>';
 }
