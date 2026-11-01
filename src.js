@@ -203,6 +203,30 @@ document.addEventListener('click',async e=>{
       tab=b.dataset.tab;
       render();
     }
+    if(b.dataset.delete){
+  const job=jobs.find(j=>String(j.id)===b.dataset.delete);
+  if(!job || job.owner_id!==user?.id)throw Error('본인 공고만 삭제할 수 있습니다.');
+  if(!confirm('이 공고를 삭제하시겠습니까?'))return;
+  const {error}=await db.from('jobs').delete()
+    .eq('id',job.id).eq('owner_id',user.id);
+  if(error)throw error;
+  await refresh();
+  status('공고가 삭제되었습니다.');
+  return;
+}
+if(b.dataset.edit){
+  const job=jobs.find(j=>String(j.id)===b.dataset.edit);
+  if(!job || job.owner_id!==user?.id)throw Error('본인 공고만 수정할 수 있습니다.');
+  const title=prompt('공고 제목 수정',job.title);
+  if(title===null)return;
+  if(!title.trim())throw Error('공고 제목을 입력하세요.');
+  const {error}=await db.from('jobs').update({title:title.trim()})
+    .eq('id',job.id).eq('owner_id',user.id);
+  if(error)throw error;
+  await refresh();
+  status('공고 제목이 수정되었습니다.');
+  return;
+}
     if(b.id==='logout'){
       await db.auth.signOut();
     }
