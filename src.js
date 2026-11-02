@@ -15,6 +15,11 @@ let jobs = [];
 let tab = 'jobs';
 let editing = null;
 let search = '';
+let regionFilter = '';
+let womenOnly = false;
+let beginnerOnly = false;
+let payOnly = false;
+
 let ready = false;
 let busy = false;
 let epoch = 0;
@@ -79,18 +84,24 @@ function nav() {
     </button>
   `).join('')}</nav>`;
 }
-
-function filtered() {
+  
+          function filtered() {
   const term = search.trim().toLowerCase();
 
-  return term
-    ? jobs.filter(j =>
-        [j.title, j.region, j.description]
-          .join(' ')
-          .toLowerCase()
-          .includes(term)
-      )
-    : jobs;
+  return jobs.filter(j => {
+    const desc = String(j.description || '');
+    const text = [j.title, j.region, desc]
+      .join(' ').toLowerCase();
+
+    const women = /여성\s*(지원\s*)?(가능|환영)|여자\s*(가능|환영)|여성\s*우대/i;
+    const beginner = /초보\s*(지원\s*)?(가능|환영)|초보자\s*(가능|환영)|경력\s*무관|무경력\s*가능/i;
+
+    return (!term || text.includes(term))
+      && (!regionFilter || j.region === regionFilter)
+      && (!womenOnly || women.test(desc))
+      && (!beginnerOnly || beginner.test(desc))
+      && (!payOnly || Number(j.daily_pay) >= 150000);
+  });
 }
 
 function cards(items) {
@@ -265,6 +276,19 @@ function render() {
         <h2>현장 일자리</h2>
         <input id="search" placeholder="직종·지역 검색"
           aria-label="일자리 검색" value="${safe(search)}">
+              <label>지역 선택
+          <select id="regionFilter">
+            <option value="">전체 지역</option>
+            ${areas.map(r => `<option value="${safe(r)}" ${regionFilter === r ? 'selected' : ''}>${safe(r)}</option>`).join('')}
+          </select>
+        </label>
+
+        <div class="filter-options">
+          <label><input type="checkbox" id="womenOnly" ${womenOnly ? 'checked' : ''}> 여성 가능</label>
+          <label><input type="checkbox" id="beginnerOnly" ${beginnerOnly ? 'checked' : ''}> 초보 가능</label>
+          <label><input type="checkbox" id="payOnly" ${payOnly ? 'checked' : ''}> 일당 15만 원 이상</label>
+        </div>
+        <p class="muted">여성·초보 조건은 상세 설명을 기준으로 검색합니다.</p>
       </section>
       <div id="joblist">${cards(filtered())}</div>
     `;
@@ -479,7 +503,19 @@ document.addEventListener('input', e => {
 
   if (list) list.innerHTML = cards(filtered());
 });
+document.addEventListener('change', e => {
+  const id = e.target.id;
 
+  if (!['regionFilter', 'womenOnly', 'beginnerOnly', 'payOnly'].includes(id)) return;
+
+  if (id === 'regionFilter') regionFilter = e.target.value;
+  if (id === 'womenOnly') womenOnly = e.target.checked;
+  if (id === 'beginnerOnly') beginnerOnly = e.target.checked;
+  if (id === 'payOnly') payOnly = e.target.checked;
+
+  const list = el('joblist');
+  if (list) list.innerHTML = cards(filtered());
+});
 document.addEventListener('click', async e => {
   const button = e.target.closest('button');
 
