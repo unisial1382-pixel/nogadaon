@@ -19,7 +19,7 @@ let regionFilter = '';
 let womenOnly = false;
 let beginnerOnly = false;
 let payOnly = false;
-
+let paidAds = [];
 let ready = false;
 let busy = false;
 let epoch = 0;
@@ -103,7 +103,57 @@ function nav() {
       && (!payOnly || Number(j.daily_pay) >= 150000);
   });
 }
+function adCards() {
+  const pool = paidAds
+    .filter(a => jobs.some(j => j.id === a.job_id))
+    .map(a => ({
+      ...a,
+      weight: Number(a.ad_plans?.rotation_weight || 1)
+    }));
 
+  const selected = [];
+
+  while (pool.length && selected.length < 3) {
+    const total = pool.reduce((s, a) => s + a.weight, 0);
+    let pick = Math.random() * total;
+    let index = 0;
+
+    for (; index < pool.length - 1; index++) {
+      pick -= pool[index].weight;
+      if (pick < 0) break;
+    }
+
+    selected.push(pool.splice(index, 1)[0]);
+  }
+
+  if (!selected.length) return '';
+
+  const featured = selected
+    .map(a => jobs.find(j => j.id === a.job_id))
+    .filter(Boolean);
+
+  return `
+    <section>
+      <h2>⭐ 유료 상단 광고</h2>
+      <p class="muted">광고 · 유료 프로모션</p>
+    </section>
+    ${cards(featured)}
+  `;
+}
+
+async function fetchAds() {
+  const now = new Date().toISOString();
+
+  const { data, error } = await db
+    .from('job_ads')
+    .select('job_id,plan_code,ad_plans(rotation_weight)')
+    .eq('active', true)
+    .lte('starts_at', now)
+    .gt('ends_at', now);
+
+  if (error) throw error;
+  return data || [];
+}
 function cards(items) {
   return items.map(j => `
     <article>
@@ -290,7 +340,8 @@ function render() {
         </div>
         <p class="muted">여성·초보 조건은 상세 설명을 기준으로 검색합니다.</p>
       </section>
-      <div id="joblist">${cards(filtered())}</div>
+      <div id="paidAds">${adCards()}</div>
+<div id="joblist">${cards(filtered())}</div>
     `;
   }
 
@@ -321,12 +372,17 @@ async function fetchJobs() {
 }
 
 async function refresh(id, version) {
-  const list = await fetchJobs();
+  const [list, ads] = await Promise.all([
+  fetchJobs(),
+  fetchAds()
+]);
 
   if (user?.id !== id || epoch !== version) return false;
 
   jobs = list;
-  render();
+paidAds = ads;
+render();
+  
   return true;
 }
 
@@ -358,12 +414,13 @@ async function applySession(session, version) {
   render();
 
   try {
-    const [pr, js] = await Promise.all([
+    const [pr, js,ads] = await Promise.all([
       db.from('profiles')
         .select('id,role')
         .eq('id', next.id)
         .maybeSingle(),
-      fetchJobs()
+      fetchJobs(),
+fetchAds()
     ]);
 
     if (pr.error) throw pr.error;
@@ -371,7 +428,8 @@ async function applySession(session, version) {
 
     profile = pr.data;
     jobs = js;
-    ready = true;
+paidAds = ads;
+ready = true;
     render();
   } catch (err) {
     if (user?.id !== next.id || epoch !== version) return;
