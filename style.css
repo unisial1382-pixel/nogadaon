@@ -190,3 +190,51 @@ textarea {
     flex: 1;
   }
 }
+
+/* 모바일 필터 디자인 */
+.filter-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.filter-options label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  background: #f4f7fb;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.filter-options input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: #15263c;
+}
+
+/* 공고 카드 가독성 */
+article h3 {
+  font-size: 21px;
+  margin: 16px 0;
+}
+
+article p {
+  line-height: 1.7;
+}
+
+article .actions {
+  margin-top: 16px;
+}
+
+@media (max-width: 500px) {
+  article .actions button {
+    font-size: 14px;
+    padding: 12px 8px;
+  }
+}
