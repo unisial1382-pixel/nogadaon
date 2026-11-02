@@ -838,3 +838,132 @@ if (db) {
     }, 0);
   });
 }
+
+// 사진·동영상 선택 취소 및 개별 삭제 기능
+
+const originalPostForm = postForm;
+
+postForm = function () {
+  return originalPostForm()
+    .replace(
+      /(<input\s+name="photos"\s+type="file"\s+accept="image\/jpeg,image\/png,image\/webp"\s+multiple>)/,
+      '$1\n<button type="button" data-clear-file="photos">✕ 선택한 사진 취소</button>'
+    )
+    .replace(
+      /(<input\s+name="video"\s+type="file"\s+accept="video\/mp4,video\/webm,video\/quicktime">)/,
+      '$1\n<button type="button" data-clear-file="video">✕ 선택한 동영상 취소</button>'
+    );
+};
+
+mediaView = function (job) {
+  const media = Array.isArray(job.media) ? job.media : [];
+
+  return media.map((item, index) => {
+    if (!item || !item.path ||
+        !['image', 'video'].includes(item.type)) return '';
+
+    const src = safe(mediaUrl(item.path));
+
+    const content = item.type === 'video'
+      ? `<video controls playsinline style="width:100%" src="${src}"></video>`
+      : `<img loading="lazy" alt="현장 사진" style="width:100%" src="${src}">`;
+
+    const remove = owner(job)
+      ? `<button type="button"
+          data-remove-media="${safe(job.id)}"
+          data-media-index="${index}">
+          ✕ ${item.type === 'video' ? '동영상' : '사진'} 삭제
+        </button>`
+      : '';
+
+    return `<div style="margin:12px 0">
+      ${content}
+      ${remove}
+    </div>`;
+  }).join('');
+};
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('button');
+
+  if (!button || busy) return;
+
+  if (button.dataset.clearFile) {
+    const input = document
+      .getElementById('post')
+      ?.elements.namedItem(button.dataset.clearFile);
+
+    if (input) {
+      input.value = '';
+
+      notify(button.dataset.clearFile === 'photos'
+        ? '선택한 사진을 취소했습니다.'
+        : '선택한 동영상을 취소했습니다.');
+    }
+    return;
+  }
+
+  if (!button.dataset.removeMedia) return;
+
+  const job = jobs.find(
+    j => String(j.id) === button.dataset.removeMedia
+  );
+
+  if (!job || !owner(job)) {
+    notify('본인 공고의 파일만 삭제할 수 있습니다.');
+    return;
+  }
+
+  const index = Number(button.dataset.mediaIndex);
+  const media = Array.isArray(job.media) ? job.media : [];
+
+  if (!Number.isInteger(index) ||
+      index < 0 ||
+      index >= media.length) return;
+
+  const item = media[index];
+
+  if (!item?.path ||
+      !confirm('이 사진 또는 동영상을 삭제하시겠습니까?')) {
+    return;
+  }
+
+  const currentUserId = user.id;
+  const currentEpoch = epoch;
+
+  lock(true);
+
+  try {
+    const remaining = media.filter((_, i) => i !== index);
+
+    const { data, error } = await db
+      .from('jobs')
+      .update({ media: remaining })
+      .eq('id', job.id)
+      .eq('owner_id', currentUserId)
+      .select('id');
+
+    if (error) throw error;
+
+    if (data?.length !== 1) {
+      throw Error('파일 정보를 수정하지 못했습니다.');
+    }
+
+    const { error: removeError } = await db.storage
+      .from('job-media')
+      .remove([item.path]);
+
+    if (await refresh(currentUserId, currentEpoch)) {
+      notify(removeError
+        ? '공고에서는 삭제됐습니다. 저장소 파일 정리가 필요합니다.'
+        : '사진 또는 동영상이 삭제되었습니다.');
+    }
+  } catch (error) {
+    if (user?.id === currentUserId &&
+        epoch === currentEpoch) {
+      notify('삭제 오류: ' + error.message);
+    }
+  } finally {
+    lock(false);
+  }
+}, true);
