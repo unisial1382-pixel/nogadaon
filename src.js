@@ -36,6 +36,21 @@ const safe = v => String(v ?? '').replace(
   }[c])
 );
 
+const mediaUrl = path =>
+  db.storage.from('job-media').getPublicUrl(path).data.publicUrl;
+
+function mediaView(j) {
+  return (Array.isArray(j.media) ? j.media : [])
+    .map(m => {
+      const src = safe(mediaUrl(m.path));
+      return m.type === 'video'
+        ? `<video controls playsinline
+            style="width:100%" src="${src}"></video>`
+        : `<img loading="lazy" alt="현장 사진"
+            style="width:100%" src="${src}">`;
+    }).join('');
+}
+  
 const won = v => Number(v || 0).toLocaleString('ko-KR') + '원';
 const el = id => document.getElementById(id);
 const owner = j => !!user && j.owner_id === user.id;
@@ -159,6 +174,9 @@ function cards(items) {
     <article>
       <span class="pill">${safe(j.region)}</span>
       <h3>${safe(j.title)}</h3>
+        ${mediaView(j)}
+
+
       <p>
         일당 <b>${won(j.daily_pay)}</b>
         · 모집 ${safe(j.slots)}명
@@ -248,6 +266,23 @@ function postForm() {
           <textarea name="description" rows="12"
             maxlength="8000">${value('description')}</textarea>
         </label>
+        
+<label>
+  현장 사진 (무료 최대 3장 · 유료 최대 5장)
+  <input
+    name="photos"
+    type="file"
+    accept="image/jpeg,image/png,image/webp"
+    multiple>
+</label>
+
+<label>
+  현장 동영상 (유료 광고만 · 최대 30초)
+  <input
+    name="video"
+    type="file"
+    accept="video/mp4,video/webm,video/quicktime">
+</label>
 
         <div class="actions">
           <button type="submit">
@@ -508,6 +543,70 @@ document.addEventListener('submit', async e => {
     ) {
       throw Error('입력값을 확인하세요.');
     }
+     
+    const photos = [...(form.elements.namedItem('photos')?.files || [])];
+    const video = form.elements.namedItem('video')?.files?.[0];
+    const existing = Array.isArray(edit?.media) ? edit.media : [];
+
+    const paid = edit
+      ? paidAds.some(a => a.job_id === edit.id)
+      : false;
+
+    const maxPhotos = paid ? 5 : 3;
+    const photoCount = existing.filter(m => m.type === 'image').length;
+
+    if (photoCount + photos.length > maxPhotos) {
+      throw Error(`사진은 최대 ${maxPhotos}장까지 가능합니다.`);
+    }
+
+    if (video && !paid) {
+      throw Error('동영상은 유료 광고 공고에서만 등록할 수 있습니다.');
+    }
+
+    if (video && existing.some(m => m.type === 'video')) {
+      throw Error('동영상은 1개만 등록할 수 있습니다.');
+    }
+
+    const mediaFiles = [
+      ...photos.map(file => ({ file, type: 'image' })),
+      ...(video ? [{ file: video, type: 'video' }] : [])
+    ];
+
+    for (const { file, type } of mediaFiles) {
+      const allowed = type === 'image'
+        ? ['image/jpeg', 'image/png', 'image/webp']
+        : ['video/mp4', 'video/webm', 'video/quicktime'];
+
+      const maxSize = type === 'image' ? 5 : 30;
+
+      if (!allowed.includes(file.type) ||
+          file.size > maxSize * 1024 * 1024) {
+        throw Error('파일 형식 또는 용량을 확인하세요.');
+      }
+
+      if (type === 'video') {
+        const duration = await new Promise((resolve, reject) => {
+          const player = document.createElement('video');
+          const tempUrl = URL.createObjectURL(file);
+
+          player.preload = 'metadata';
+          player.onloadedmetadata = () => {
+            const seconds = player.duration;
+            URL.revokeObjectURL(tempUrl);
+            resolve(seconds);
+          };
+          player.onerror = () => {
+            URL.revokeObjectURL(tempUrl);
+            reject(Error('영상 파일을 읽을 수 없습니다.'));
+          };
+          player.src = tempUrl;
+        });
+
+        if (!Number.isFinite(duration) || duration > 30) {
+          throw Error('동영상은 최대 30초까지 가능합니다.');
+        }
+      }
+    }
 
     let query;
 
@@ -534,6 +633,53 @@ document.addEventListener('submit', async e => {
     }
 
     if (user?.id !== id || epoch !== version) return;
+    
+    const jobId = data[0].id;
+    const uploaded = [];
+
+    try {
+      for (const { file, type } of mediaFiles) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const path = `${id}/${jobId}/${crypto.randomUUID()}.${ext}`;
+
+        const { error: uploadError } = await db.storage
+          .from('job-media')
+          .upload(path, file, {
+            contentType: file.type,
+            upsert: false
+          });
+
+        if (uploadError) throw uploadError;
+
+        uploaded.push({ path, type });
+      }
+
+      if (uploaded.length) {
+        const { data: saved, error: mediaError } = await db
+          .from('jobs')
+          .update({ media: [...existing, ...uploaded] })
+          .eq('id', jobId)
+          .eq('owner_id', id)
+          .select('id');
+
+        if (mediaError) throw mediaError;
+
+        if (saved?.length !== 1) {
+          throw Error('파일 정보를 저장하지 못했습니다.');
+        }
+      }
+    } catch (uploadError) {
+      if (uploaded.length) {
+        await db.storage
+          .from('job-media')
+          .remove(uploaded.map(m => m.path));
+      }
+
+      throw Error(
+        '공고는 저장됐지만 파일 업로드에 실패했습니다: ' +
+        uploadError.message
+      );
+    }
 
     editing = null;
     tab = 'jobs';
