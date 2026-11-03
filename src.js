@@ -1101,11 +1101,29 @@ async function adOpenPanel() {
       ${!b.account_number
         ? '<p>관리자 계좌 등록 후 신청할 수 있습니다.</p>'
         : ''}
+      
       <h3>내 신청 내역</h3>
-      ${list.map(r => `
-        <p>${r.plan_code === 'week_7' ? '7일' : '30일'}
-        · ${safe(r.status)}</p>
-      `).join('') || '<p>신청 내역이 없습니다.</p>'}
+      ${list.map(r => {
+        const plan = r.plan_code === 'week_7'
+          ? { label: '7일 · 10,000원', url: 'https://www.payapp.kr/L/z4nsjC' }
+          : r.plan_code === 'month_30'
+            ? { label: '30일 · 30,000원', url: 'https://www.payapp.kr/L/z4nsp2' }
+            : null;
+        return `
+          <article>
+            <p>광고 상품: ${safe(plan?.label || '알 수 없는 상품')}</p>
+            <p>신청 상태: ${safe(r.status)}</p>
+            ${r.status === 'pending' && plan ? `
+              <p><a href="${plan.url}" target="_blank" rel="noopener noreferrer">
+                ${safe(plan.label)} 카드결제하기
+              </a></p>
+              <p>계좌이체를 선택하셨다면 카드결제는 하지 마세요.</p>
+              <p>카드결제 후 결제자명과 신청 공고를 관리자에게 알려주세요.</p>
+            ` : ''}
+          </article>
+        `;
+      }).join('') || '<p>신청 내역이 없습니다.</p>'}
+
     `;
   } catch (err) {
     box.textContent = '광고 조회 오류: ' + err.message;
