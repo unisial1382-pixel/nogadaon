@@ -967,3 +967,260 @@ document.addEventListener('click', async event => {
     lock(false);
   }
 }, true);
+
+/* 노가다ON 유료 광고 신청 및 관리자 관리 */
+const adOriginalRender = render;
+
+render = function () {
+  adOriginalRender();
+  if (!user || tab !== 'account') return;
+
+  const main = document.querySelector('main');
+  if (!main) return;
+
+  const section = document.createElement('section');
+  section.innerHTML = `
+    <h2>유료 광고</h2>
+    <button type="button" id="adOpen">
+      ${profile?.role === 'admin'
+        ? '광고 관리 · 계좌 설정'
+        : '광고 신청하기'}
+    </button>
+    <div id="adPanel"></div>
+  `;
+  main.appendChild(section);
+};
+
+async function adOpenPanel() {
+  const box = document.getElementById('adPanel');
+  if (!box || !user) return;
+
+  box.textContent = '불러오는 중입니다.';
+
+  try {
+    const admin = profile?.role === 'admin';
+
+    const [bank, requests] = await Promise.all([
+      db.from('ad_bank_settings')
+        .select('*').eq('id', 1).single(),
+      db.from('ad_requests')
+        .select('*')
+        .order('created_at', { ascending: false })
+    ]);
+
+    if (bank.error) throw bank.error;
+    if (requests.error) throw requests.error;
+
+    const b = bank.data;
+    const list = requests.data || [];
+
+    if (admin) {
+      box.innerHTML = `
+        <h3>입금 계좌 설정</h3>
+        <form id="adBankSave">
+          <label>은행
+            <input name="bank" required
+              value="${safe(b.bank_name)}">
+          </label>
+          <label>예금주
+            <input name="holder" required
+              value="${safe(b.account_holder)}">
+          </label>
+          <label>계좌번호
+            <input name="number" required
+              inputmode="numeric"
+              value="${safe(b.account_number)}">
+          </label>
+          <button type="submit">계좌 저장</button>
+        </form>
+        <h3>광고 신청 내역</h3>
+        ${list.map(r => `
+          <article>
+            <p>공고 ID: ${safe(r.job_id)}</p>
+            <p>${r.plan_code === 'week_7'
+              ? '7일 · 10,000원'
+              : '30일 · 30,000원'}</p>
+            <p>입금자: ${safe(r.depositor_name)}</p>
+            <p>상태: ${safe(r.status)}</p>
+            ${r.status === 'pending' ? `
+              <button type="button"
+                data-ad-approve="${safe(r.id)}">
+                입금 확인 · 광고 승인
+              </button>
+              <button type="button"
+                data-ad-reject="${safe(r.id)}">
+                신청 거절
+              </button>` : ''}
+          </article>
+        `).join('') || '<p>신청 내역이 없습니다.</p>'}
+      `;
+      return;
+    }
+
+    if (!company()) {
+      box.textContent =
+        '광고 신청은 업체·인력사무소 계정에서 가능합니다.';
+      return;
+    }
+
+    const ownJobs = jobs.filter(j => owner(j));
+
+    box.innerHTML = `
+      <h3>유료 광고 신청</h3>
+      <p>7일 10,000원 / 30일 30,000원</p>
+      <p>농협 ${safe(b.account_number || '계좌 등록 대기')}</p>
+      <p>예금주: ${safe(b.account_holder)}</p>
+      <p>입금 확인 후 광고가 활성화됩니다.</p>
+      <form id="adApply">
+        <label>광고할 공고
+          <select name="job" required>
+            ${ownJobs.map(j => `
+              <option value="${safe(j.id)}">
+                ${safe(j.title)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+        <label>광고 상품
+          <select name="plan">
+            <option value="week_7">7일 · 10,000원</option>
+            <option value="month_30">30일 · 30,000원</option>
+          </select>
+        </label>
+        <label>입금자명
+          <input name="depositor" required maxlength="80">
+        </label>
+        <button type="submit"
+          ${!ownJobs.length || !b.account_number
+            ? 'disabled' : ''}>
+          광고 신청
+        </button>
+      </form>
+      ${!ownJobs.length
+        ? '<p>먼저 구인공고를 등록하세요.</p>' : ''}
+      ${!b.account_number
+        ? '<p>관리자 계좌 등록 후 신청할 수 있습니다.</p>'
+        : ''}
+      <h3>내 신청 내역</h3>
+      ${list.map(r => `
+        <p>${r.plan_code === 'week_7' ? '7일' : '30일'}
+        · ${safe(r.status)}</p>
+      `).join('') || '<p>신청 내역이 없습니다.</p>'}
+    `;
+  } catch (err) {
+    box.textContent = '광고 조회 오류: ' + err.message;
+  }
+}
+
+document.addEventListener('click', async e => {
+  const button = e.target.closest('button');
+  if (!button || busy) return;
+
+  if (button.id === 'adOpen') {
+    await adOpenPanel();
+    return;
+  }
+
+  const approve = button.dataset.adApprove;
+  const reject = button.dataset.adReject;
+  if (!approve && !reject) return;
+
+  if (profile?.role !== 'admin') return;
+  if (!confirm(approve
+    ? '입금 확인 후 광고를 활성화하시겠습니까?'
+    : '이 광고 신청을 거절하시겠습니까?')) return;
+
+  lock(true);
+  try {
+    const { error } = await db.rpc(
+      approve ? 'approve_ad_request' : 'reject_ad_request',
+      { p_request_id: approve || reject }
+    );
+    if (error) throw error;
+
+    notify(approve
+      ? '광고가 승인되었습니다.'
+      : '광고 신청을 거절했습니다.');
+
+    await adOpenPanel();
+    paidAds = await fetchAds();
+  } catch (err) {
+    notify('광고 처리 오류: ' + err.message);
+  } finally {
+    lock(false);
+  }
+});
+
+document.addEventListener('submit', async e => {
+  if (!['adBankSave', 'adApply'].includes(e.target.id))
+    return;
+
+  e.preventDefault();
+  if (!user || busy) return;
+
+  const form = e.target;
+  const v = Object.fromEntries(new FormData(form));
+
+  lock(true);
+  try {
+    if (form.id === 'adBankSave') {
+      if (profile?.role !== 'admin')
+        throw Error('관리자 권한이 필요합니다.');
+
+      const number = String(v.number || '').trim();
+      if (!/^[0-9-]{5,40}$/.test(number))
+        throw Error('계좌번호를 확인하세요.');
+
+      const { data, error } = await db
+        .from('ad_bank_settings')
+        .update({
+          bank_name: String(v.bank || '').trim(),
+          account_holder: String(v.holder || '').trim(),
+          account_number: number,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', 1).select('id');
+
+      if (error) throw error;
+      if (data?.length !== 1)
+        throw Error('계좌 저장 권한을 확인하세요.');
+
+      notify('계좌 설정이 저장되었습니다.');
+    } else {
+      if (!company())
+        throw Error('업체 계정이 필요합니다.');
+
+      const job = jobs.find(j => j.id === v.job);
+      if (!job || !owner(job))
+        throw Error('본인 공고를 선택하세요.');
+
+      const plan = v.plan;
+      if (!['week_7', 'month_30'].includes(plan))
+        throw Error('광고 상품을 확인하세요.');
+
+      const depositor = String(v.depositor || '').trim();
+      if (!depositor || depositor.length > 80)
+        throw Error('입금자명을 확인하세요.');
+
+      const { error } = await db.from('ad_requests')
+        .insert({
+          job_id: job.id,
+          requester_id: user.id,
+          plan_code: plan,
+          amount: plan === 'week_7' ? 10000 : 30000,
+          depositor_name: depositor,
+          status: 'pending'
+        });
+
+      if (error) throw error;
+      notify('광고 신청이 접수되었습니다.');
+    }
+
+    await adOpenPanel();
+  } catch (err) {
+    notify('광고 저장 오류: ' + err.message);
+  } finally {
+    lock(false);
+  }
+});
+
