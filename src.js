@@ -1103,25 +1103,26 @@ async function adOpenPanel() {
         : ''}
       
       <h3>내 신청 내역</h3>
+      
       ${list.map(r => {
         const plan = r.plan_code === 'week_7'
-          ? { label: '7일 · 10,000원', url: 'https://www.payapp.kr/L/z4nsjC' }
+          ? { label: '7일 · 10,000원' }
           : r.plan_code === 'month_30'
-            ? { label: '30일 · 30,000원', url: 'https://www.payapp.kr/L/z4nsp2' }
+            ? { label: '30일 · 30,000원' }
             : null;
         return `
           <article>
             <p>광고 상품: ${safe(plan?.label || '알 수 없는 상품')}</p>
             <p>신청 상태: ${safe(r.status)}</p>
             ${r.status === 'pending' && plan ? `
-              <p><a href="${plan.url}" target="_blank" rel="noopener noreferrer">
-                ${safe(plan.label)} 카드결제하기
-              </a></p>
-              <p>계좌이체를 선택하셨다면 카드결제는 하지 마세요.</p>
-              <p>카드결제 후 결제자명과 신청 공고를 관리자에게 알려주세요.</p>
+              <button type="button" data-ad-pay="${safe(r.id)}">
+                카드결제 요청
+              </button>
+              <p>계좌이체로 이미 납부했다면 카드결제하지 마세요.</p>
             ` : ''}
           </article>
         `;
+
       }).join('') || '<p>신청 내역이 없습니다.</p>'}
 
     `;
@@ -1131,6 +1132,7 @@ async function adOpenPanel() {
 }
 
 document.addEventListener('click', async e => {
+    
   const button = e.target.closest('button');
   if (!button || busy) return;
 
@@ -1138,6 +1140,69 @@ document.addEventListener('click', async e => {
     await adOpenPanel();
     return;
   }
+  
+  const adPayId = button.dataset.adPay;
+
+  if (adPayId) {
+    if (!user || !db || busy) return;
+
+    const phone = prompt('결제받을 휴대폰 번호를 입력하세요.');
+
+    if (phone === null) return;
+
+    const recvphone = phone.replace(/\D/g, '');
+
+    if (!/^01[016789]\d{7,8}$/.test(recvphone)) {
+      notify('휴대폰 번호를 확인하세요.');
+      return;
+    }
+
+    lock(true);
+
+    try {
+      const { data, error } = await db.auth.getSession();
+
+      if (error || !data?.session?.access_token) {
+        throw Error('다시 로그인하세요.');
+      }
+
+      const response = await fetch('/api/payapp-request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + data.session.access_token
+        },
+        body: JSON.stringify({
+          ad_request_id: adPayId,
+          recvphone
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success || !result.payurl) {
+        throw Error(result.error || '결제 요청 실패');
+      }
+
+      const payUrl = new URL(result.payurl);
+
+      if (payUrl.protocol !== 'https:' ||
+          !(payUrl.hostname === 'payapp.kr' ||
+            payUrl.hostname.endsWith('.payapp.kr'))) {
+        throw Error('결제 주소 오류');
+      }
+
+      window.location.assign(payUrl.href);
+
+    } catch (err) {
+      notify('결제 요청 오류: ' + err.message);
+    } finally {
+      lock(false);
+    }
+
+    return;
+  }
+
 
   const approve = button.dataset.adApprove;
   const reject = button.dataset.adReject;
