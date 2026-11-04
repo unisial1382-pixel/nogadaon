@@ -1,6 +1,5 @@
 
-import { timingSafeEqual } from 'node:crypto';
-
+import { timingSafeEqual, createHash } from 'node:crypto';
 function same(a, b) {
   if (typeof a !== 'string' ||
       typeof b !== 'string' || !a || !b) {
@@ -58,9 +57,11 @@ export default async function handler(req, res) {
   const data = parseBody(req.body);
 
   const {
-    userid,
+        userid,
     linkkey,
     linkval,
+    responsedate,
+    hash,
     price,
     pay_state,
     mul_no,
@@ -75,7 +76,25 @@ export default async function handler(req, res) {
   ) {
     return res.status(403).end('Verification failed');
   }
+  const requestkey = process.env.PAYAPP_REQUESTKEY;
+  const timestamp = String(responsedate || '');
+  const receivedHash = String(hash || '');
 
+  if (
+    !requestkey ||
+    !/^\d{14}$/.test(timestamp) ||
+    !/^[0-9a-f]{64}$/i.test(receivedHash)
+  ) {
+    return res.status(403).end('Invalid payment hash');
+  }
+
+  const expectedHash = createHash('sha256')
+    .update(String(userid) + timestamp + requestkey)
+    .digest('hex');
+
+  if (!same(receivedHash.toLowerCase(), expectedHash)) {
+    return res.status(403).end('Invalid payment hash');
+  }
   if (
     !UUID.test(String(var1 || '')) ||
     !UUID.test(String(var2 || '')) ||
