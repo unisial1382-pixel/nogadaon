@@ -34,7 +34,11 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
-    return res.status(200).json({
+    
+  console.log('PayApp feedback GET check');
+
+  return res.status(200).json({
+  
       service: 'payapp-feedback',
       configured: Boolean(
         process.env.PAYAPP_USERID &&
