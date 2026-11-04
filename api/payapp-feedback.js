@@ -125,40 +125,31 @@ export default async function handler(req, res) {
       return res.status(409).end('Order mismatch');
     }
 
-    if (rows[0].status === 'paid') {
-      return res.status(200).end('SUCCESS');
-    }
-
-    if (rows[0].status !== 'requested') {
+    
+    if (!['requested', 'paid'].includes(rows[0].status)) {
       return res.status(409).end('Invalid order status');
     }
 
-    const updated = await fetch(
-      `${url}/rest/v1/ad_payments?id=eq.${rows[0].id}&status=eq.requested`,
+    const activated = await fetch(
+      `${url}/rest/v1/rpc/complete_payapp_ad_payment`,
       {
-        method: 'PATCH',
-        headers: {
-          ...headers,
-          Prefer: 'return=representation'
-        },
+        method: 'POST',
+        headers,
         body: JSON.stringify({
-          status: 'paid',
-          updated_at: new Date().toISOString()
+          p_payment_id: rows[0].id,
+          p_order_id: String(var2),
+          p_transaction_id: String(mul_no),
+          p_amount: Number(price)
         })
       }
     );
 
-    if (!updated.ok) {
-      throw new Error('Payment update failed');
-    }
-
-    const changed = await updated.json();
-
-    if (changed.length !== 1) {
-      return res.status(409).end('Concurrent update');
+    if (!activated.ok || (await activated.json()) !== true) {
+      throw new Error('Payment activation failed');
     }
 
     return res.status(200).end('SUCCESS');
+
 
   } catch (error) {
     console.error(
