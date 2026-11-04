@@ -88,6 +88,34 @@ export default async function handler(req, res) {
     return res.status(403).end('Invalid payment hash');
   }
 
+const y = Number(timestamp.slice(0, 4));
+const mo = Number(timestamp.slice(4, 6));
+const d = Number(timestamp.slice(6, 8));
+const h = Number(timestamp.slice(8, 10));
+const mi = Number(timestamp.slice(10, 12));
+const s = Number(timestamp.slice(12, 14));
+
+const utcWall = Date.UTC(y, mo - 1, d, h, mi, s);
+const parsed = new Date(utcWall);
+const validCalendar =
+  parsed.getUTCFullYear() === y &&
+  parsed.getUTCMonth() === mo - 1 &&
+  parsed.getUTCDate() === d &&
+  parsed.getUTCHours() === h &&
+  parsed.getUTCMinutes() === mi &&
+  parsed.getUTCSeconds() === s;
+
+const now = Date.now();
+const kstInstant = utcWall - 9 * 60 * 60 * 1000;
+const allowed = instant =>
+  instant <= now + 15 * 60 * 1000 &&
+  instant >= now - 48 * 60 * 60 * 1000;
+
+if (!validCalendar ||
+    !(allowed(utcWall) || allowed(kstInstant))) {
+  return res.status(403).end('Invalid payment timestamp');
+}
+  
   const expectedHash = createHash('sha256')
     .update(String(userid) + timestamp + requestkey)
     .digest('hex');
