@@ -59,3 +59,15 @@ jobs:
           name: NogadaON-APK
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          
+
+      - name: Build release AAB
+        working-directory: android
+        run: bash ./gradlew bundleRelease
+
+      - name: Save AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: NogadaON-AAB-unsigned
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
